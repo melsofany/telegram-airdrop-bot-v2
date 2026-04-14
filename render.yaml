@@ -9,4 +9,6 @@ services:
         value: 8643958185:AAHykYc6Jjz1jRhkl-2DnJn2r-qaE8eC2qY
       - key: NODE_ENV
         value: production
+      - key: DEEPSEEK_API_KEY
+        value: sk-c9cbe6dbe1f64503a5afebe3c561df99
     autoDeploy: true
