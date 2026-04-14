@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: telegram-airdrop-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
+    branch: main
+    envVars:
+      - key: BOT_TOKEN
+        value: 8643958185:AAHykYc6Jjz1jRhkl-2DnJn2r-qaE8eC2qY
+      - key: NODE_ENV
+        value: production
+    autoDeploy: true

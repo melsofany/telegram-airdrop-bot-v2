@@ -1,0 +1,23 @@
+{
+  "name": "telegram-airdrop-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for crypto airdrops and faucet automation",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": ["telegram", "bot", "crypto", "airdrop", "faucet"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "telegraf": "^4.14.1",
+    "playwright": "^1.44.0",
+    "axios": "^1.6.5",
+    "cheerio": "^1.0.0-rc.12",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.6",
+    "dotenv": "^16.3.1"
+  }
+}
