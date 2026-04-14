@@ -243,30 +243,36 @@ bot.action('get_referral', async (ctx) => {
 bot.catch((err) => console.error('Telegraf error:', err));
 
 async function main() {
-  try {
-    console.log('🚀 Starting Telegram Airdrop Bot...');
-    await initDatabase();
-    dbInitialized = true;
-    await startAutomationScheduler();
-    await bot.launch();
-    console.log('✅ Bot is running!');
+    try {
+      console.log('🚀 Starting Telegram Airdrop Bot...');
+      await initDatabase();
+      dbInitialized = true;
 
-    // HTTP server to satisfy Render port binding requirement
-    const PORT = process.env.PORT || 3000;
-    const server = http.createServer((req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('Telegram Airdrop Bot is running!');
-    });
-    server.listen(PORT, () => {
-      console.log('🌐 HTTP server listening on port ' + PORT);
-    });
+      // Start HTTP server FIRST so Render detects the open port
+      const PORT = process.env.PORT || 3000;
+      const server = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('Telegram Airdrop Bot is running!');
+      });
+      server.listen(PORT, () => {
+        console.log('🌐 HTTP server listening on port ' + PORT);
+      });
 
-    process.once('SIGINT', () => { bot.stop('SIGINT'); server.close(); });
-    process.once('SIGTERM', () => { bot.stop('SIGTERM'); server.close(); });
-  } catch (error) {
-    console.error('Fatal error:', error);
-    process.exit(1);
+      await startAutomationScheduler();
+
+      // Do NOT await bot.launch() — it blocks until the bot stops
+      bot.launch().catch((err) => {
+        console.error('Bot launch error:', err);
+        process.exit(1);
+      });
+      console.log('✅ Bot is running!');
+
+      process.once('SIGINT', () => { bot.stop('SIGINT'); server.close(); });
+      process.once('SIGTERM', () => { bot.stop('SIGTERM'); server.close(); });
+    } catch (error) {
+      console.error('Fatal error:', error);
+      process.exit(1);
+    }
   }
-}
 
-main();
+  main();
