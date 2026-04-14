@@ -21,6 +21,7 @@ export async function initDatabase() {
       user_id INTEGER UNIQUE NOT NULL,
       username TEXT,
       wallet_address TEXT,
+      wallet_network TEXT,
       notifications_enabled INTEGER DEFAULT 1,
       join_date DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -72,9 +73,9 @@ export async function getOrCreateUser(userId, username) {
   return user;
 }
 
-export async function updateUserWallet(userId, walletAddress) {
+export async function updateUserWallet(userId, walletAddress, network) {
   if (!db) throw new Error('Database not initialized');
-  await db.run('UPDATE users SET wallet_address = ? WHERE user_id = ?', [walletAddress, userId]);
+  await db.run('UPDATE users SET wallet_address = ?, wallet_network = ? WHERE user_id = ?', [walletAddress, network, userId]);
 }
 
 export async function toggleNotifications(userId, enabled) {

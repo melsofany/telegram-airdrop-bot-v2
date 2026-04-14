@@ -19,9 +19,14 @@ dotenv.config();
 const BOT_TOKEN = process.env.BOT_TOKEN || '8643958185:AAHykYc6Jjz1jRhkl-2DnJn2r-qaE8eC2qY';
 const bot = new Telegraf(BOT_TOKEN);
 
+// State management for wizard-like flows
+const userState = new Map();
+
+const SUPPORTED_SITES = ['FreeBitco.in', 'Cointiply', 'FireFaucet'];
+const SUPPORTED_NETWORKS = ['ERC20', 'BEP20', 'TRC20', 'SOL', 'TON'];
+
 // Initialize database on startup
 let dbInitialized = false;
-
 async function ensureDb() {
   if (!dbInitialized) {
     await initDatabase();
@@ -53,213 +58,168 @@ bot.start(async (ctx) => {
   }
 });
 
-bot.action('view_airdrops', async (ctx) => {
-  try {
-    await ensureDb();
-    const airdrops = await getActiveAirdrops();
-    
-    if (airdrops.length === 0) {
-      await ctx.editMessageText(
-        '🚀 لا توجد إيردروبات نشطة حالياً. سأقوم بتنبيهك فور توفرها!',
-        Markup.inlineKeyboard([[Markup.button.callback('🔙 العودة', 'back_to_main')]])
-      );
-    } else {
-      let text = '🚀 **أحدث الإيردروبات المتاحة:**\n\n';
-      airdrops.forEach((ad, i) => {
-        text += `${i + 1}. **${ad.name}**\n`;
-        text += `🔗 [رابط التسجيل](${ad.link})\n`;
-        text += `💰 القيمة: ${ad.reward_value || 'غير محددة'}\n\n`;
-      });
-      
-      await ctx.editMessageText(
-        text,
-        {
-          parse_mode: 'Markdown',
-          disable_web_page_preview: true,
-          reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔙 العودة', 'back_to_main')]]).reply_markup
-        }
-      );
-    }
-  } catch (error) {
-    console.error('Error viewing airdrops:', error);
-  }
+// --- Faucets & Automation ---
+bot.action('view_faucets', async (ctx) => {
+  const text = 
+    '💰 **نظام الجمع التلقائي (Faucets)**\n\n' +
+    'يمكنك إضافة حساباتك في المواقع المدعومة وسأقوم بالجمع لك تلقائياً.\n\n' +
+    '**الخيارات المتاحة:**';
+  
+  const keyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('⚡ جمع الآن يدوياً', 'run_manual_claim')],
+    [Markup.button.callback('➕ إضافة حساب جديد', 'select_site')],
+    [Markup.button.callback('🔙 العودة', 'back_to_main')]
+  ]);
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard.reply_markup });
 });
 
-bot.action('view_faucets', async (ctx) => {
-  try {
-    const text = 
-      '💰 **نظام الجمع التلقائي (Faucets)**\n\n' +
-      'يمكنك إضافة حساباتك في المواقع المدعومة وسأقوم بالجمع لك تلقائياً.\n\n' +
-      '**المواقع المدعومة حالياً:**\n' +
-      '1. FreeBitco.in\n' +
-      '2. Cointiply\n' +
-      '3. FireFaucet\n\n' +
-      '**الخيارات المتاحة:**';
-    
-    const keyboard = Markup.inlineKeyboard([
-      [Markup.button.callback('⚡ جمع الآن يدوياً', 'run_manual_claim')],
-      [Markup.button.callback('➕ إضافة حساب', 'add_account_info')],
-      [Markup.button.callback('🔙 العودة', 'back_to_main')]
-    ]);
+bot.action('select_site', async (ctx) => {
+  const buttons = SUPPORTED_SITES.map(site => [Markup.button.callback(site, `add_site_${site}`)]);
+  buttons.push([Markup.button.callback('🔙 العودة', 'view_faucets')]);
+  
+  await ctx.editMessageText('اختر الموقع الذي تريد إضافته:', Markup.inlineKeyboard(buttons));
+});
 
-    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard.reply_markup });
-  } catch (error) {
-    console.error('Error viewing faucets:', error);
-  }
+bot.action(/add_site_(.+)/, async (ctx) => {
+  const site = ctx.match[1];
+  userState.set(ctx.from.id, { step: 'await_email', site });
+  await ctx.editMessageText(`لقد اخترت **${site}**.\n\nالآن، يرجى إرسال **البريد الإلكتروني** الخاص بحسابك:`, { parse_mode: 'Markdown' });
 });
 
 bot.action('run_manual_claim', async (ctx) => {
-  try {
-    await ctx.answerCbQuery('⏳ جاري بدء عملية الجمع التلقائي...');
-    await runAutomationCycle();
-    await ctx.reply('✅ اكتملت دورة الجمع التلقائي لجميع حساباتك النشطة.');
-  } catch (error) {
-    console.error('Error running manual claim:', error);
-    await ctx.reply('❌ فشل تشغيل الجمع التلقائي. تأكد من إضافة حسابات أولاً.');
-  }
+  await ctx.answerCbQuery('⏳ جاري بدء عملية الجمع التلقائي...');
+  await runAutomationCycle();
+  await ctx.reply('✅ اكتملت دورة الجمع التلقائي لجميع حساباتك النشطة.');
 });
 
-bot.action('add_account_info', async (ctx) => {
-  await ctx.reply(
-    'لإضافة حساب جديد، استخدم الأمر التالي:\n' +
-    '`/add_account <site_name> <email> <password>`\n\n' +
-    'مثال:\n' +
-    '`/add_account FreeBitco.in user@example.com pass123`',
-    { parse_mode: 'Markdown' }
-  );
-});
-
+// --- Stats ---
 bot.action('view_stats', async (ctx) => {
-  try {
-    await ensureDb();
-    const stats = await getUserStats(ctx.from.id);
-    const user = await getOrCreateUser(ctx.from.id, ctx.from.username);
-    
-    const text = 
-      '📊 **إحصائياتك الشخصية:**\n\n' +
-      `👤 المستخدم: ${ctx.from.first_name}\n` +
-      `👛 المحفظة: \`${user.wallet_address || 'لم يتم التحديد'}\`\n` +
-      `🏦 عدد الحسابات: ${stats.accountsCount}\n` +
-      `🔄 عمليات الجمع: ${stats.totalClaims}\n` +
-      `💰 الأرباح المقدرة: ${stats.totalAmount} BTC\n\n` +
-      '💡 قم بإضافة محفظتك من الإعدادات لاستلام الأرباح.';
-    
-    await ctx.editMessageText(text, {
-      parse_mode: 'Markdown',
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('🔗 رابط الإحالة', 'get_referral')],
-        [Markup.button.callback('🔙 العودة', 'back_to_main')]
-      ]).reply_markup
-    });
-  } catch (error) {
-    console.error('Error viewing stats:', error);
-  }
+  await ensureDb();
+  const stats = await getUserStats(ctx.from.id);
+  const user = await getOrCreateUser(ctx.from.id, ctx.from.username);
+  
+  const text = 
+    '📊 **إحصائياتك الشخصية:**\n\n' +
+    `👤 المستخدم: ${ctx.from.first_name}\n` +
+    `👛 المحفظة: \`${user.wallet_address || 'غير مضافة'}\`\n` +
+    `🌐 الشبكة: \`${user.wallet_network || 'غير محددة'}\`\n` +
+    `🏦 عدد الحسابات: ${stats.accountsCount}\n` +
+    `🔄 عمليات الجمع: ${stats.totalClaims}\n` +
+    `💰 الأرباح المقدرة: ${stats.totalAmount} BTC`;
+  
+  await ctx.editMessageText(text, {
+    parse_mode: 'Markdown',
+    reply_markup: Markup.inlineKeyboard([
+      [Markup.button.callback('🔗 رابط الإحالة', 'get_referral')],
+      [Markup.button.callback('🔙 العودة', 'back_to_main')]
+    ]).reply_markup
+  });
 });
 
+// --- Settings ---
 bot.action('view_settings', async (ctx) => {
-  try {
-    await ensureDb();
-    const user = await getOrCreateUser(ctx.from.id, ctx.from.username);
-    const notifyStatus = user.notifications_enabled ? '✅ مفعلة' : '❌ معطلة';
+  await ensureDb();
+  const user = await getOrCreateUser(ctx.from.id, ctx.from.username);
+  const notifyStatus = user.notifications_enabled ? '✅ مفعلة' : '❌ معطلة';
 
-    const text = 
-      '⚙️ **الإعدادات**\n\n' +
-      `🔔 التنبيهات: ${notifyStatus}\n` +
-      `👛 المحفظة الحالية: \`${user.wallet_address || 'غير مضافة'}\`\n\n` +
-      'اختر ما تريد تعديله:';
-    
-    const keyboard = Markup.inlineKeyboard([
-      [Markup.button.callback(`🔔 ${user.notifications_enabled ? 'تعطيل' : 'تفعيل'} التنبيهات`, 'toggle_notify')],
-      [Markup.button.callback('👛 إضافة/تعديل المحفظة', 'edit_wallet')],
-      [Markup.button.callback('📂 إدارة الحسابات والبروكسي', 'manage_accounts')],
-      [Markup.button.callback('🔙 العودة', 'back_to_main')]
-    ]);
+  const text = 
+    '⚙️ **الإعدادات**\n\n' +
+    `🔔 التنبيهات: ${notifyStatus}\n` +
+    `👛 المحفظة: \`${user.wallet_address || 'غير مضافة'}\`\n` +
+    `🌐 الشبكة: \`${user.wallet_network || 'غير محددة'}\`\n\n` +
+    'اختر ما تريد تعديله:';
+  
+  const keyboard = Markup.inlineKeyboard([
+    [Markup.button.callback(`🔔 ${user.notifications_enabled ? 'تعطيل' : 'تفعيل'} التنبيهات`, 'toggle_notify')],
+    [Markup.button.callback('👛 إعداد المحفظة والشبكة', 'setup_wallet')],
+    [Markup.button.callback('📂 إدارة الحسابات والبروكسي', 'manage_accounts')],
+    [Markup.button.callback('🔙 العودة', 'back_to_main')]
+  ]);
 
-    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard.reply_markup });
-  } catch (error) {
-    console.error('Error viewing settings:', error);
-  }
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard.reply_markup });
+});
+
+bot.action('setup_wallet', async (ctx) => {
+  const buttons = SUPPORTED_NETWORKS.map(net => [Markup.button.callback(net, `set_net_${net}`)]);
+  buttons.push([Markup.button.callback('🔙 العودة', 'view_settings')]);
+  
+  await ctx.editMessageText('يرجى اختيار نوع الشبكة أولاً:', Markup.inlineKeyboard(buttons));
+});
+
+bot.action(/set_net_(.+)/, async (ctx) => {
+  const net = ctx.match[1];
+  userState.set(ctx.from.id, { step: 'await_wallet', network: net });
+  await ctx.editMessageText(`تم اختيار شبكة **${net}**.\n\nالآن، يرجى إرسال **عنوان المحفظة**:`, { parse_mode: 'Markdown' });
 });
 
 bot.action('toggle_notify', async (ctx) => {
-  try {
-    await ensureDb();
-    const user = await getOrCreateUser(ctx.from.id, ctx.from.username);
-    await toggleNotifications(ctx.from.id, !user.notifications_enabled);
-    await ctx.answerCbQuery('تم تحديث إعدادات التنبيهات');
-    return bot.handleAction(ctx, 'view_settings');
-  } catch (error) {
-    console.error('Error toggling notifications:', error);
-  }
+  await ensureDb();
+  const user = await getOrCreateUser(ctx.from.id, ctx.from.username);
+  await toggleNotifications(ctx.from.id, !user.notifications_enabled);
+  await ctx.answerCbQuery('تم تحديث إعدادات التنبيهات');
+  return bot.handleAction(ctx, 'view_settings');
 });
 
-bot.action('edit_wallet', async (ctx) => {
-  await ctx.reply('يرجى إرسال عنوان محفظتك باستخدام الأمر التالي:\n`/set_wallet <address>`');
-});
-
+// --- Accounts Management ---
 bot.action('manage_accounts', async (ctx) => {
-  try {
-    await ensureDb();
-    const accounts = await getUserAccounts(ctx.from.id);
-    if (accounts.length === 0) {
-      return ctx.reply('ليس لديك حسابات مضافة حالياً. استخدم /add_account للإضافة.');
-    }
-
-    let text = '📂 **حساباتك المضافة:**\n\n';
-    const buttons = [];
-    accounts.forEach((acc) => {
-      text += `🔹 ${acc.site_name} (${acc.email})\n🌐 بروكسي: ${acc.proxy || 'بدون'}\n\n`;
-      buttons.push([Markup.button.callback(`❌ حذف ${acc.site_name}`, `del_acc_${acc.id}`)]);
-      buttons.push([Markup.button.callback(`🌐 بروكسي ${acc.site_name}`, `proxy_acc_${acc.id}`)]);
-    });
-    buttons.push([Markup.button.callback('🔙 العودة', 'view_settings')]);
-
-    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard(buttons).reply_markup });
-  } catch (error) {
-    console.error('Error managing accounts:', error);
+  await ensureDb();
+  const accounts = await getUserAccounts(ctx.from.id);
+  if (accounts.length === 0) {
+    return ctx.editMessageText('ليس لديك حسابات مضافة حالياً.', Markup.inlineKeyboard([[Markup.button.callback('🔙 العودة', 'view_settings')]]));
   }
+
+  let text = '📂 **حساباتك المضافة:**\n\n';
+  const buttons = [];
+  accounts.forEach((acc) => {
+    text += `🔹 ${acc.site_name} (${acc.email})\n`;
+    buttons.push([Markup.button.callback(`❌ حذف ${acc.site_name}`, `del_acc_${acc.id}`)]);
+  });
+  buttons.push([Markup.button.callback('🔙 العودة', 'view_settings')]);
+
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: Markup.inlineKeyboard(buttons).reply_markup });
 });
 
 bot.action(/del_acc_(\d+)/, async (ctx) => {
-  const accId = ctx.match[1];
-  await deleteAccount(accId, ctx.from.id);
+  await deleteAccount(ctx.match[1], ctx.from.id);
   await ctx.answerCbQuery('تم حذف الحساب');
   return bot.handleAction(ctx, 'manage_accounts');
 });
 
-bot.action(/proxy_acc_(\d+)/, async (ctx) => {
-  const accId = ctx.match[1];
-  await ctx.reply(`لإضافة بروكسي لهذا الحساب، أرسل:\n\`/set_proxy ${accId} <ip:port:user:pass>\``);
-});
+// --- Text Message Handler (Wizard Flow) ---
+bot.on('text', async (ctx) => {
+  const state = userState.get(ctx.from.id);
+  if (!state) return;
 
-bot.command('set_wallet', async (ctx) => {
-  const wallet = ctx.message.text.split(' ')[1];
-  if (!wallet) return ctx.reply('يرجى إدخال عنوان المحفظة. مثال: `/set_wallet 0x...`');
-  await ensureDb();
-  await updateUserWallet(ctx.from.id, wallet);
-  await ctx.reply('✅ تم تحديث عنوان المحفظة بنجاح.');
-});
-
-bot.command('set_proxy', async (ctx) => {
-  const parts = ctx.message.text.split(' ');
-  if (parts.length < 3) return ctx.reply('الصيغة: `/set_proxy <account_id> <proxy_details>`');
-  await ensureDb();
-  await updateAccountProxy(parts[1], ctx.from.id, parts[2]);
-  await ctx.reply('✅ تم تحديث البروكسي للحساب.');
-});
-
-bot.command('add_account', async (ctx) => {
   try {
-    const parts = ctx.message.text.split(' ');
-    if (parts.length < 4) {
-      return ctx.reply('الصيغة: `/add_account <site_name> <email> <password>`');
+    if (state.step === 'await_email') {
+      state.email = ctx.message.text;
+      state.step = 'await_password';
+      await ctx.reply(`تم استلام البريد: \`${state.email}\`\n\nالآن أرسل **كلمة المرور**:`, { parse_mode: 'Markdown' });
+    } 
+    else if (state.step === 'await_password') {
+      const password = ctx.message.text;
+      await ensureDb();
+      await addAccount(ctx.from.id, state.site, state.email, password);
+      userState.delete(ctx.from.id);
+      await ctx.reply(`✅ تم إضافة حساب **${state.site}** بنجاح!`, {
+        reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔙 القائمة الرئيسية', 'back_to_main')]]).reply_markup
+      });
     }
-    await ensureDb();
-    await addAccount(ctx.from.id, parts[1], parts[2], parts[3]);
-    await ctx.reply(`✅ تم إضافة حساب ${parts[1]} بنجاح.`);
+    else if (state.step === 'await_wallet') {
+      const wallet = ctx.message.text;
+      await ensureDb();
+      await updateUserWallet(ctx.from.id, wallet, state.network);
+      userState.delete(ctx.from.id);
+      await ctx.reply(`✅ تم حفظ المحفظة بنجاح!\n\nالشبكة: **${state.network}**\nالعنوان: \`${wallet}\``, {
+        parse_mode: 'Markdown',
+        reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔙 القائمة الرئيسية', 'back_to_main')]]).reply_markup
+      });
+    }
   } catch (error) {
-    console.error('Error in add_account:', error);
-    await ctx.reply('❌ حدث خطأ أثناء إضافة الحساب.');
+    console.error('Error in wizard flow:', error);
+    await ctx.reply('❌ حدث خطأ أثناء المعالجة. يرجى المحاولة مرة أخرى.');
+    userState.delete(ctx.from.id);
   }
 });
 
