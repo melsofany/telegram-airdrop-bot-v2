@@ -20,6 +20,8 @@ export async function initDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER UNIQUE NOT NULL,
       username TEXT,
+      wallet_address TEXT,
+      notifications_enabled INTEGER DEFAULT 1,
       join_date DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -30,6 +32,7 @@ export async function initDatabase() {
       email TEXT NOT NULL,
       password TEXT NOT NULL,
       proxy TEXT,
+      is_active INTEGER DEFAULT 1,
       FOREIGN KEY (user_id) REFERENCES users(user_id)
     );
 
@@ -69,6 +72,16 @@ export async function getOrCreateUser(userId, username) {
   return user;
 }
 
+export async function updateUserWallet(userId, walletAddress) {
+  if (!db) throw new Error('Database not initialized');
+  await db.run('UPDATE users SET wallet_address = ? WHERE user_id = ?', [walletAddress, userId]);
+}
+
+export async function toggleNotifications(userId, enabled) {
+  if (!db) throw new Error('Database not initialized');
+  await db.run('UPDATE users SET notifications_enabled = ? WHERE user_id = ?', [enabled ? 1 : 0, userId]);
+}
+
 export async function addAccount(userId, siteName, email, password, proxy = null) {
   if (!db) throw new Error('Database not initialized');
   
@@ -82,27 +95,32 @@ export async function addAccount(userId, siteName, email, password, proxy = null
 
 export async function getUserAccounts(userId) {
   if (!db) throw new Error('Database not initialized');
-  
   return await db.all('SELECT * FROM accounts WHERE user_id = ?', userId);
+}
+
+export async function deleteAccount(accountId, userId) {
+  if (!db) throw new Error('Database not initialized');
+  await db.run('DELETE FROM accounts WHERE id = ? AND user_id = ?', [accountId, userId]);
+}
+
+export async function updateAccountProxy(accountId, userId, proxy) {
+  if (!db) throw new Error('Database not initialized');
+  await db.run('UPDATE accounts SET proxy = ? WHERE id = ? AND user_id = ?', [proxy, accountId, userId]);
 }
 
 export async function getActiveAirdrops() {
   if (!db) throw new Error('Database not initialized');
-  
   return await db.all('SELECT * FROM airdrops WHERE status = ? LIMIT 5', 'active');
 }
 
 export async function addAirdrop(name, link, rewardValue = null) {
   if (!db) throw new Error('Database not initialized');
-  
   try {
     await db.run(
       'INSERT INTO airdrops (name, link, reward_value) VALUES (?, ?, ?)',
       [name, link, rewardValue]
     );
-  } catch (err) {
-    // Airdrop already exists
-  }
+  } catch (err) {}
 }
 
 export async function getUserStats(userId) {
@@ -132,7 +150,6 @@ export async function getUserStats(userId) {
 
 export async function addClaim(accountId, siteName, amount) {
   if (!db) throw new Error('Database not initialized');
-  
   await db.run(
     'INSERT INTO claims (account_id, site_name, amount) VALUES (?, ?, ?)',
     [accountId, siteName, amount]
